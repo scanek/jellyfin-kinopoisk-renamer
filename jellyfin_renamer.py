@@ -900,17 +900,36 @@ def process_batch(root_dir, category, action="move", dry_run=False, rename_folde
     logger.info("=" * 60)
 
 def trigger_jellyfin_refresh(logger=None):
-    """Triggers Jellyfin library scan if accessible."""
+    """Triggers Jellyfin library scan using configured jellyfin_url and jellyfin_api_key."""
     cfg = load_app_config()
-    token = cfg.get("jellyfin_api_key", "")
-    base_url = cfg.get("jellyfin_url", "http://localhost:8096").rstrip("/")
-    urls = [f"{base_url}/Library/Refresh", "http://localhost:8098/Library/Refresh", "http://172.26.0.1:8098/Library/Refresh", "http://localhost:8096/Library/Refresh"]
-    import urllib.request
-    import urllib.error
+    token = cfg.get("jellyfin_api_key", "").strip()
+    if not token:
+        if logger:
+            logger.debug("Jellyfin API key not configured; skipping library refresh.")
+        return False
+
+    base_url = cfg.get("jellyfin_url", "http://localhost:8096").strip().rstrip("/")
+    if not base_url:
+        return False
+
+    parsed = urllib.parse.urlparse(base_url)
+    scheme = parsed.scheme or "http"
+    host = parsed.hostname or "localhost"
+    port_str = f":{parsed.port}" if parsed.port else ""
+
+    urls = [f"{base_url}/Library/Refresh"]
+
+    # When running inside Docker and target is localhost/127.0.0.1, attempt host gateway fallbacks on the same port
+    if host in ("localhost", "127.0.0.1") and os.path.exists("/.dockerenv"):
+        for fallback_host in ["host.docker.internal", "172.17.0.1"]:
+            fallback_url = f"{scheme}://{fallback_host}{port_str}/Library/Refresh"
+            if fallback_url not in urls:
+                urls.append(fallback_url)
+
     for url in urls:
         try:
             req = urllib.request.Request(url, method="POST")
-            req.add_header("Authorization", f'MediaBrowser Client="qBittorrent-Renamer", Device="NAS", DeviceId="nas-qbit-renamer", Version="1.0.0", Token="{token}"')
+            req.add_header("Authorization", f'MediaBrowser Client="qBittorrent-Renamer", Device="Renamer", DeviceId="renamer-service", Version="1.0.0", Token="{token}"')
             with urllib.request.urlopen(req, timeout=3) as resp:
                 if resp.status in (200, 204):
                     if logger:
@@ -918,6 +937,9 @@ def trigger_jellyfin_refresh(logger=None):
                     return True
         except Exception:
             continue
+
+    if logger:
+        logger.warning(f"Could not refresh Jellyfin library at {base_url}/Library/Refresh")
     return False
 
 def main():
