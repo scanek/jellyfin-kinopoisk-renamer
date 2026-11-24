@@ -1,0 +1,17 @@
+# Sensitive configuration files containing private API keys
+config.json
+.env
+
+# Runtime caches and logs
+kp_cache.json
+*.log
+renamer.log
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS artifacts
+.DS_Store
+Thumbs.db

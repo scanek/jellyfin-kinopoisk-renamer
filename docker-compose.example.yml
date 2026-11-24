@@ -1,0 +1,17 @@
+services:
+  jellyfin-renamer:
+    build: .
+    container_name: jellyfin-renamer
+    restart: unless-stopped
+    environment:
+      - KINOPOISK_API_KEY=YOUR_KINOPOISK_API_KEY_HERE
+      - JELLYFIN_URL=http://jellyfin:8096
+      - JELLYFIN_API_KEY=YOUR_JELLYFIN_API_KEY_HERE
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      # Mount your media libraries
+      - /path/to/media/movies:/media/movies
+      - /path/to/media/series:/media/series
+    # Example command to run a dry-run check on the movies folder:
+    # command: ["--dry-run", "/media/movies"]

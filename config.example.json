@@ -1,0 +1,9 @@
+{
+  "kinopoisk_api_key": "YOUR_KINOPOISK_UNOFFICIAL_API_KEY_HERE",
+  "jellyfin_url": "http://localhost:8096",
+  "jellyfin_api_key": "YOUR_JELLYFIN_API_KEY_HERE",
+  "puid": 1000,
+  "pgid": 1000,
+  "action": "move",
+  "rename_folders": true
+}
