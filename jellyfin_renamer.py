@@ -2,10 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Jellyfin Universal Media Renamer & Organizer
-Designed for Debian / OpenMediaVault / Docker / qBittorrent
-Supports Russian / Cyrillic torrent releases, series seasons, movies, and subtitles.
-Supports dedicated folders for movies, renaming episodes & release folders for Jellyfin.
-Supports single-torrent mode and batch mode (--all) for entire media libraries.
+Automated media organizer and renamer for Jellyfin and qBittorrent.
 """
 
 import sys
@@ -118,7 +115,7 @@ def clean_title(title, is_folder=False):
             year = year_match.group(1)
             cleaned = re.sub(r'\b' + year + r'\b', ' ', cleaned)
 
-    # Replace dots between non-space characters with spaces (preserve dot with space, like 'Папины дочки. Новые')
+    # Replace dots between words with spaces while preserving dotted titles
     cleaned = re.sub(r'(?<=\S)\.(?=\S)', ' ', cleaned)
     cleaned = cleaned.replace('_', ' ')
 
@@ -354,28 +351,28 @@ def extract_season_episode(filename, folder_name="", torrent_name=""):
 
     stem = os.path.splitext(filename)[0]
 
-    # Pattern 1: Standard S01E02, s1e2, S01E02-E03
+    # Standard notation: S01E02, s1e2, S01E01-E02
     m = re.search(r'[Ss](\d{1,2})[._\s-]*[Ee](\d{1,3})(?:-[Ee]?\d{1,3})?', stem, re.IGNORECASE)
     if m:
         season = int(m.group(1))
         episode = int(m.group(2))
         return season, episode
 
-    # Pattern 2: Cyrillic С01Э02
+    # Cyrillic notation: C01E02
     m = re.search(r'[Сс](\d{1,2})[._\s-]*[Ээ](\d{1,3})', stem, re.IGNORECASE)
     if m:
         season = int(m.group(1))
         episode = int(m.group(2))
         return season, episode
 
-    # Pattern 3: 1x02, 01x02
+    # Alternate notation: 1x02
     m = re.search(r'\b(\d{1,2})x(\d{1,3})\b', stem, re.IGNORECASE)
     if m:
         season = int(m.group(1))
         episode = int(m.group(2))
         return season, episode
 
-    # Pattern 4: Russian 'XX серия' / 'серия XX' / 'эпизод XX'
+    # Text notation: 'серия XX', 'выпуск XX'
     m = re.search(r'(\d{1,3})\s*(?:серия|эпизод|выпуск)', stem, re.IGNORECASE)
     if m:
         episode = int(m.group(1))
@@ -384,7 +381,7 @@ def extract_season_episode(filename, folder_name="", torrent_name=""):
         if m:
             episode = int(m.group(1))
 
-    # Pattern 5: Leading number like '10.  Папины дочки' or '01. Очарованные'
+    # Leading episode number: '01. Title'
     if episode is None:
         m = re.match(r'^\s*(\d{1,3})\s*[\.\-_\s]', stem)
         if m:
@@ -976,24 +973,25 @@ def main():
 
     if "--help" in argv or "-h" in argv:
         print("""Jellyfin Universal Media Renamer
-Использование:
-  jrename [ПАРАМЕТРЫ] <ПУТЬ> [КАТЕГОРИЯ] [ИМЯ_ТОРРЕНТА]
-  jtest [ПАРАМЕТРЫ] <ПУТЬ> [КАТЕГОРИЯ] [ИМЯ_ТОРРЕНТА]
+Usage:
+  python3 jellyfin_renamer.py [OPTIONS] <PATH> [CATEGORY] [TORRENT_NAME]
 
-Примеры:
-  jtest /volume2/torrents/movies        # Тестовый прогон (dry-run) по фильмам
-  jrename /volume2/torrents/movies       # Пакетное переименование фильмов
-  jtest /volume2/torrents/series        # Тестовый прогон (dry-run) по сериалам
-  jrename /volume2/torrents/series       # Пакетное переименование сериалов
-  jrename "/path/to/folder"            # Переименование одного релиза
+Examples:
+  python3 jellyfin_renamer.py --dry-run /path/to/movies
+  python3 jellyfin_renamer.py /path/to/movies
+  python3 jellyfin_renamer.py --dry-run /path/to/series
+  python3 jellyfin_renamer.py /path/to/series
+  python3 jellyfin_renamer.py "/path/to/release_folder"
 
-Параметры:
-  --dry-run             Тестовый режим (без реальных изменений)
-  --no-kp               Отключить Кинопоиск (оставить оригинальные названия)
-  --no-rename-folder    Не переименовывать саму папку релиза
+Options:
+  --dry-run             Simulate changes without modifying files
+  --no-kp               Disable Kinopoisk search
+  --no-rename-folder    Do not rename parent release directory
   --action {move,copy,hardlink}
-                        Действие над файлами (по умолчанию: move)
-  -h, --help            Показать эту справку
+                        Action to perform (default: move)
+  --kp-key KEY          Override Kinopoisk API key
+  --log-file PATH       Custom log file path
+  -h, --help            Show this help message
 """)
         sys.exit(0)
 
@@ -1005,11 +1003,12 @@ def main():
     category = argv[1].strip('"\'').lower() if len(argv) > 1 else ""
     torrent_name = argv[2].strip('"\'') if len(argv) > 2 else ""
 
-    log_file = "/config/scripts/renamer.log"
-    if not os.path.exists(os.path.dirname(log_file)):
-        log_file = "/volume1/logs/renamer.log"
-        if not os.path.exists("/volume1/logs"):
-            log_file = None
+    log_file = None
+    for cand in ["/config/scripts/renamer.log", os.path.join(os.path.dirname(os.path.abspath(__file__)), "renamer.log")]:
+        d = os.path.dirname(os.path.abspath(cand))
+        if os.path.exists(d) and os.access(d, os.W_OK):
+            log_file = cand
+            break
 
     logger = setup_logger(log_file)
 
