@@ -837,23 +837,31 @@ def is_library_root(target_path):
     if base in ('series', 'movies', 'сериалы', 'фильмы'):
         return True
 
-    subdirs = 0
+    subdirs = []
     direct_videos = []
 
     for item in os.listdir(target_path):
         p = os.path.join(target_path, item)
         if os.path.isdir(p):
             if item.lower() not in IGNORED_DIRS and not item.startswith('.'):
-                subdirs += 1
+                subdirs.append(item)
         elif os.path.isfile(p):
             ext = os.path.splitext(item)[1].lower()
             if ext in VIDEO_EXTS:
                 direct_videos.append(item)
 
-    if subdirs >= 2:
-        return True
+    # If it contains Season XX subfolders, it is a TV show folder, NOT a library root!
+    if any(re.match(r'^(?:Season\s+\d{1,2}|Спецматериалы|Specials)$', d, re.I) for d in subdirs):
+        return False
 
-    if len(direct_videos) > 1 and not any(re.match(r'^Season\s+\d{2}$', d, re.I) for d in os.listdir(target_path) if os.path.isdir(os.path.join(target_path, d))):
+    # If it contains direct video files with episode markers, it is a TV show folder, NOT a library root!
+    if direct_videos:
+        has_episodes = any(extract_season_episode(f)[1] is not None for f in direct_videos)
+        if has_episodes:
+            return False
+
+    # A library root typically has 2 or more subdirectories representing different shows/movies
+    if len(subdirs) >= 2:
         return True
 
     return False
@@ -941,6 +949,41 @@ def trigger_jellyfin_refresh(logger=None):
     if logger:
         logger.warning(f"Could not refresh Jellyfin library at {base_url}/Library/Refresh")
     return False
+
+def resolve_concatenated_path(target_path):
+    """
+    Attempts to recover a valid path if arguments were accidentally concatenated,
+    such as qBittorrent '%F%L%N' missing spaces/quotes.
+    """
+    if os.path.exists(target_path):
+        return target_path
+
+    check = target_path
+    existing_dir = None
+    while check and check != os.path.dirname(check):
+        check = os.path.dirname(check)
+        if os.path.isdir(check):
+            existing_dir = check
+            break
+
+    if not existing_dir:
+        return target_path
+
+    candidates = []
+    target_norm = os.path.normpath(os.path.abspath(target_path))
+    try:
+        for entry in os.scandir(existing_dir):
+            entry_path = os.path.normpath(os.path.abspath(entry.path))
+            if target_norm.startswith(entry_path) and len(entry_path) < len(target_norm):
+                candidates.append(entry.path)
+    except Exception:
+        pass
+
+    if candidates:
+        candidates.sort(key=lambda x: len(x), reverse=True)
+        return candidates[0]
+
+    return target_path
 
 def main():
     argv = sys.argv[1:]
@@ -1043,8 +1086,13 @@ Options:
     logger.info("=" * 60)
 
     if not os.path.exists(target_path):
-        logger.error(f"Target path does not exist: {target_path}")
-        sys.exit(1)
+        recovered = resolve_concatenated_path(target_path)
+        if recovered != target_path and os.path.exists(recovered):
+            logger.warning(f"Target path '{target_path}' did not exist, but recovered valid path: '{recovered}'")
+            target_path = recovered
+        else:
+            logger.error(f"Target path does not exist: {target_path}")
+            sys.exit(1)
 
     # Auto-detect category if empty
     if not category:
